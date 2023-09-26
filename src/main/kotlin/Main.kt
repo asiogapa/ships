@@ -1,13 +1,40 @@
 import java.util.*
 
 const val BOARD_SIZE = 10
+const val SHOT_SHIP = 9
+const val MISSED_SHOT = 1
 
-enum class Ship(val signature: Int, val size: Int) {
-    BATTLESHIP(50, 5),
-    DESTROYER1(41, 4),
-    DESTROYER2(42, 4)
+
+class Ship(val name: String, val signature: Int, val size: Int) {
+    private var shotsToTake = size
+
+    fun shot() {
+        shotsToTake--
+    }
+
+    fun isDown(): Boolean = shotsToTake <= 0
+    fun isAlive(): Boolean = !(isDown())
 }
 
+data class GameData(
+    val computerBoard: Array<Array<Int>> = Array(BOARD_SIZE) { Array(BOARD_SIZE) { 0 } },
+    val playerBoard: Array<Array<Int>> = Array(BOARD_SIZE) { Array(BOARD_SIZE) { 0 } },
+    val playingShips: MutableList<Ship> = mutableListOf(),
+    var round: Int = 0
+)
+
+
+fun isGameFinished(gameData: GameData): Boolean =
+    gameData.playingShips.all { it.isDown() }
+
+fun printDownShips(gameData: GameData) {
+    for (ship in gameData.playingShips) {
+        if (ship.isDown()) {
+            print("${ship.name} is down.")
+        }
+    }
+    println()
+}
 fun printBoard(board: Array<Array<Int>>) {
     println("Current board:")
     println("        A   B   C   D   E   F   G   H   I   J")
@@ -15,16 +42,17 @@ fun printBoard(board: Array<Array<Int>>) {
     for ((index, row) in board.withIndex()) {
         print("%3d | ".format(index+1))
         for (element in row) {
-            print("%3d ".format(element))
+            if (element == MISSED_SHOT)
+                print("%3c ".format('x'))
+            else if (element == SHOT_SHIP)
+                print("%3c ".format('*'))
+            else
+                print("%3d ".format(element))
         }
         println()
     }
     println()
 }
-
-
-// What to do if not possible to put another ship
-
 
 fun checkShipPlacement(
     board: Array<Array<Int>>,
@@ -32,35 +60,37 @@ fun checkShipPlacement(
     xCoordinate: Int,
     yCoordinate: Int,
     verticalPosition: Boolean
-): Boolean {
+): List<Pair<Int,Int>>? {
+    val cells = arrayListOf<Pair<Int,Int>>()
     if (verticalPosition) {
         // ship won't fit
         if (xCoordinate > board.size - ship.size)
-            return false
+            return null
         // collision with other ship
         for (i in xCoordinate until xCoordinate + ship.size) {
+            cells.add(Pair(i, yCoordinate))
             if (board[i][yCoordinate] != 0)
-                return false
+                return null
         }
-        return true
     }
     else {
         // ship won't fit
         if (yCoordinate > board.size - ship.size)
-            return false
+            return null
         // collision with other ship
         for (i in yCoordinate until yCoordinate + ship.size) {
+            cells.add(Pair(xCoordinate,i))
             if (board[xCoordinate][i] != 0)
-                return false
+                return null
         }
-        return true
     }
+    return cells
 }
 
 
 fun randomlyPlaceShip(board: Array<Array<Int>>, ship: Ship) {
-    var shipToPut = true
-    while (shipToPut) {
+    var cells: List<Pair<Int,Int>>? = null
+    while (cells == null) {
 
         // choose vertical/horizontal placement
         val random = Random()
@@ -71,104 +101,133 @@ fun randomlyPlaceShip(board: Array<Array<Int>>, ship: Ship) {
         val yCoordinate = (0..9).random()
 
         // Asio here I want to combine check and put better
-        if(checkShipPlacement(board, ship, xCoordinate, yCoordinate, vertical)) {
-            if (vertical) {
-                for (i in xCoordinate until xCoordinate + ship.size)
-                    board[i][yCoordinate] = ship.signature
-            }
-            else {
-                for (i in yCoordinate until yCoordinate + ship.size)
-                    board[xCoordinate][i] = ship.signature
-            }
-            shipToPut = false
-        }
+        cells = checkShipPlacement(board, ship, xCoordinate, yCoordinate, vertical)
     }
+    cells.forEach { (x,y) -> board[x][y] = ship.signature }
 }
 
-fun play(computerBoard: Array<Array<Int>>, playerBoard: Array<Array<Int>>) {
-    val scanner = Scanner(System.`in`)
+fun shootShip(gameData: GameData, xCoordinate: Int, yCoordinate: Int) {
+    for (ship in gameData.playingShips) {
+        if (gameData.computerBoard[xCoordinate][yCoordinate] == ship.signature) {
+            ship.shot()
+            gameData.playerBoard[xCoordinate][yCoordinate] = SHOT_SHIP
+            return
+        }
+    }
+    // Asio return unknown error?
+    return
+}
 
-    var battleShipDefence = Ship.BATTLESHIP.size
-    var destroyer1Defence = Ship.DESTROYER1.size
-    var destroyer2Defence = Ship.DESTROYER2.size
-
+fun play(scanner: Scanner, gameData: GameData) {
     while(true) {
+        if (isGameFinished(gameData)) {
+            winView()
+            return
+        }
+        gameData.round++
+        currGameStateView(gameData)
         println("Make your shot:")
         val stringInput = scanner.nextLine()
-        if(stringInput.length != 2) {
+
+        if(stringInput.length < 2 || stringInput.length > 3) {
             println("Input format not recognized, please type one letter A-J followed by one number 1-10 e.g A3 and press enter")
             continue
         }
+
         val yCoordinate: Int = stringInput[0].uppercaseChar() - 'A'
-        val xCoordinate: Int = stringInput[1].digitToInt() - 1
+        val xCoordinate: Int = stringInput.drop(1).toInt() - 1
+
         if (xCoordinate >= BOARD_SIZE || xCoordinate < 0 || yCoordinate >= BOARD_SIZE || yCoordinate < 0) {
-            println("Coordinates need to be within given range")
-            continue
+            println("Coordinates need to be within given range ([A-J][1-10])")
         }
-
-        if (playerBoard[xCoordinate][yCoordinate] > 0) {
-            println("Coordinates already checked, please try another one")
+        else if (gameData.playerBoard[xCoordinate][yCoordinate] > 0) {
+            println("Coordinates already checked, try different one")
         }
-
-        else if (computerBoard[xCoordinate][yCoordinate] == 0) {
-            playerBoard[xCoordinate][yCoordinate] = 1
+        else if (gameData.computerBoard[xCoordinate][yCoordinate] == 0) {
+            gameData.playerBoard[xCoordinate][yCoordinate] = 1
             println("Missed! Make another shot")
         }
-        else if (computerBoard[xCoordinate][yCoordinate] == Ship.BATTLESHIP.signature) {
-            battleShipDefence--
-            playerBoard[xCoordinate][yCoordinate] = 9
+        else {
+            shootShip(gameData, xCoordinate, yCoordinate)
+            println("Nice shot!")
         }
-        else if (computerBoard[xCoordinate][yCoordinate] == Ship.DESTROYER1.signature) {
-            destroyer1Defence--
-            playerBoard[xCoordinate][yCoordinate] = 9
-        }
-        else if (computerBoard[xCoordinate][yCoordinate] == Ship.DESTROYER2.signature) {
-            destroyer2Defence--
-            playerBoard[xCoordinate][yCoordinate] = 9
-        }
-
-        // print when specific ship sinks
-
-        if (battleShipDefence == 0 && destroyer1Defence == 0 && destroyer2Defence == 0) {
-            println("All the ships are down, you won!")
-            return
-        }
-        printBoard(playerBoard)
     }
 }
 
-fun prepareGame(board: Array<Array<Int>>) {
-    randomlyPlaceShip(board, Ship.BATTLESHIP)
-    randomlyPlaceShip(board, Ship.DESTROYER1)
-    randomlyPlaceShip(board, Ship.DESTROYER2)
+fun prepareBoard(gameData: GameData, ships: List<Ship>) {
+    gameData.playingShips.addAll(ships)
+    for(ship in gameData.playingShips)
+        randomlyPlaceShip(gameData.computerBoard, ship)
 }
 
-fun main(args: Array<String>) {
-
-    // Asio TODOs
-
-    // Make exit/quit button
-    // Surround board with A-J, 1-10 description
-    // consider changing display to * x
-    // display current state of sink ships
-    // add mechanism to inform that ship sink
-    // Write tests (gradle build script?)
-    // Add web UI?
-    // Think about file structure
-    // make sth like exec
-    // readme
-    // github upload
-
-    val computerBoard = Array(BOARD_SIZE) { Array(BOARD_SIZE) { 0 } }
-    val playerBoard = Array(BOARD_SIZE) { Array(BOARD_SIZE) { 0 } }
-
-    println("Ships!")
-    prepareGame(computerBoard)
-
-    // Asio Does ship numbers must be unique?
-
-    printBoard(computerBoard)
-    //play(computerBoard, playerBoard)
-
-
+fun startView() {
+    println("Welcome to the ships game!")
+    println("To begin game press b")
+    println("To exit press any key")
 }
+
+fun currGameStateView(gameData: GameData) {
+    println()
+    println("~~~~~~~~~~~~~~~~~~    ROUND ${gameData.round}    ~~~~~~~~~~~~~~~~~~")
+    printDownShips(gameData)
+    printBoard(gameData.playerBoard)
+}
+
+fun winView() {
+    println()
+    println("**********************************")
+    println("All the ships are down, you win!")
+    println("**********************************")
+}
+fun endViewAndPromptForRetry(scanner: Scanner): Boolean {
+    println()
+    println("Wanna retry? [y/n]")
+    if (scanner.nextLine() == "y")
+        return true
+    else
+        println("Thanks for playing,")
+        println("hope to see you soon!")
+    return false
+}
+fun main() {
+
+    val listOfShips = listOf(
+        Ship("BATTLESHIP", 50, 5),
+        Ship("DESTROYER1", 41, 4),
+        Ship("DESTROYER2", 42, 4)
+    )
+    val scanner = Scanner(System.`in`)
+    var retry = true
+
+    while(retry) {
+        startView()
+        val beginInput =  scanner.nextLine()
+
+        if (beginInput == "b") {
+            val gameData = GameData()
+            prepareBoard(gameData, listOfShips)
+            // Asio just for debugging purposes
+            // b
+            // printBoard(gameData.computerBoard)
+            play(scanner, gameData)
+        }
+        retry = endViewAndPromptForRetry(scanner)
+    }
+}
+
+
+
+// Asio TODOs
+
+// Write tests (gradle build script?)
+// Think about file structure
+// readme
+// gitHub upload
+
+// DONE
+// Make exit/quit button
+// Surround board with A-J, 1-10 description
+// consider changing display to * x
+// display current state of sink ships
+// add mechanism to inform that ship sink
+// Add web UI?
